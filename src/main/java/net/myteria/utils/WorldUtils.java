@@ -10,19 +10,23 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World.Environment;
 import org.bukkit.WorldCreator;
-import org.bukkit.craftbukkit.v1_21_R3.CraftServer;
-import org.bukkit.craftbukkit.v1_21_R3.CraftWorld;
+import org.bukkit.craftbukkit.v1_21_R5.CraftServer;
+import org.bukkit.craftbukkit.v1_21_R5.CraftWorld;
 import org.bukkit.entity.Player;
+import org.bukkit.event.world.WorldInitEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.generator.BiomeProvider;
 import org.bukkit.generator.ChunkGenerator;
 
 import com.google.common.collect.ImmutableList;
-import com.mojang.datafixers.DataFixer;
+
 import com.mojang.serialization.Dynamic;
 import com.mojang.serialization.Lifecycle;
 
+import net.minecraft.CrashReport;
+import net.minecraft.ReportedException;
+import net.minecraft.core.BlockPosition;
 import net.minecraft.core.IRegistry;
 import net.minecraft.core.IRegistryCustom;
 import net.minecraft.core.registries.Registries;
@@ -32,21 +36,26 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.WorldLoader;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.dedicated.DedicatedServerProperties;
-
+import net.minecraft.server.level.ChunkProviderServer;
+import net.minecraft.server.level.WorldProviderNormal;
 import net.minecraft.server.level.WorldServer;
 import net.minecraft.util.ChatDeserializer;
+import net.minecraft.util.MathHelper;
 import net.minecraft.util.datafix.DataConverterRegistry;
 import net.minecraft.world.EnumDifficulty;
 import net.minecraft.world.entity.ai.village.VillageSiege;
 import net.minecraft.world.entity.npc.MobSpawnerCat;
 import net.minecraft.world.entity.npc.MobSpawnerTrader;
+import net.minecraft.world.level.ChunkCoordIntPair;
 import net.minecraft.world.level.EnumGamemode;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.MobSpawner;
 import net.minecraft.world.level.World;
 import net.minecraft.world.level.WorldSettings;
 import net.minecraft.world.level.biome.BiomeManager;
+import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.dimension.WorldDimension;
+import net.minecraft.world.level.levelgen.HeightMap;
 import net.minecraft.world.level.levelgen.MobSpawnerPatrol;
 import net.minecraft.world.level.levelgen.MobSpawnerPhantom;
 import net.minecraft.world.level.levelgen.WorldDimensions;
@@ -54,6 +63,7 @@ import net.minecraft.world.level.levelgen.WorldOptions;
 import net.minecraft.world.level.storage.Convertable;
 import net.minecraft.world.level.storage.IWorldDataServer;
 import net.minecraft.world.level.storage.LevelDataAndDimensions;
+import net.minecraft.world.level.storage.SaveData;
 import net.minecraft.world.level.storage.WorldDataServer;
 import net.minecraft.world.level.storage.WorldInfo;
 import net.minecraft.world.level.validation.ContentValidationException;
@@ -76,12 +86,9 @@ public class WorldUtils {
         if (world != null) {
             return world;
         }
-        if (generator == null) {
-            generator = server.getGenerator(name);
-        }
-        if (biomeProvider == null) {
-            biomeProvider = server.getBiomeProvider(name);
-        }
+        if (biomeProvider == null && generator != null) {
+            biomeProvider = server.getWorld("world").getBiomeProvider();
+         }
         ResourceKey<WorldDimension> actualDimension = WorldDimension.b;
         try {
             worldSession = Convertable.b(Bukkit.getWorldContainer().toPath()).validateAndCreateAccess(name, actualDimension);
@@ -89,8 +96,8 @@ public class WorldUtils {
         catch (IOException | ContentValidationException ex) {
             throw new RuntimeException(ex);
         }
+        WorldInfo worldinfo;
         if (worldSession.m()) {
-            WorldInfo worldinfo;
             try {
                 dynamic = worldSession.h();
                 worldinfo = worldSession.a(dynamic);
@@ -124,7 +131,7 @@ public class WorldUtils {
         boolean hardcore = creator.hardcore();
         WorldLoader.a worldloader = server.getServer().worldLoader;
         IRegistryCustom.Dimension iregistrycustom_dimension = worldloader.d();
-        IRegistry<WorldDimension> iregistry = iregistrycustom_dimension.e(Registries.bf);
+        IRegistry<WorldDimension> iregistry = iregistrycustom_dimension.f(Registries.bv);
         if (dynamic != null) {
             LevelDataAndDimensions leveldataanddimensions = Convertable.a(dynamic, worldloader.b(), iregistry, worldloader.c());
             worlddata = (WorldDataServer)leveldataanddimensions.a();
@@ -139,19 +146,17 @@ public class WorldUtils {
             worlddata = new WorldDataServer(worldsettings, worldoptions, worlddimensions_b.d(), lifecycle);
             iregistrycustom_dimension = worlddimensions_b.b();
         }
-        worlddata.customDimensions = iregistry = iregistrycustom_dimension.e(Registries.bf);
+        worlddata.customDimensions = iregistry = iregistrycustom_dimension.f(Registries.bv);
         worlddata.checkName(name);
         worlddata.a(server.getServer().getServerModName(), server.getServer().Q().a());
-        if (server.getServer().options.has("forceUpgrade")) {
-            net.minecraft.server.Main.a((Convertable.ConversionSession)worldSession, (DataFixer)DataConverterRegistry.a(), server.getServer().options.has("eraseCache"), () -> true, (IRegistryCustom)iregistrycustom_dimension, server.getServer().options.has("recreateRegionFiles"));
-        }
+
         long seed = BiomeManager.a((long)creator.seed());
         List<MobSpawner> list = ImmutableList.of(new MobSpawnerPhantom(), new MobSpawnerPatrol(), new MobSpawnerCat(), new VillageSiege(),new MobSpawnerTrader((IWorldDataServer)worlddata));
         WorldDimension worlddimension = (WorldDimension)iregistry.c(actualDimension);
-        ResourceKey<World> worldKey = name.equals(((levelName = server.getServer().a().l) + "_nether")) ? World.j : (name.equals((Object)(levelName + "_the_end")) ? net.minecraft.world.level.World.k : ResourceKey.a(Registries.be, MinecraftKey.b(name.toLowerCase(Locale.ROOT))));
+        ResourceKey<World> worldKey = name.equals(((levelName = server.getServer().a().l) + "_nether")) ? World.j : (name.equals((Object)(levelName + "_the_end")) ? net.minecraft.world.level.World.k : ResourceKey.a(Registries.bu, MinecraftKey.b(name.toLowerCase(Locale.ROOT))));
         
         if (!creator.keepSpawnInMemory()) {
-            ((GameRules.GameRuleInt)worlddata.o().a(GameRules.ab)).set(0, null);
+            ((GameRules.GameRuleInt)worlddata.o().b(GameRules.ac)).set(0, null);
         }
         
         WorldServer internal = new WorldServer(
@@ -161,39 +166,56 @@ public class WorldUtils {
         		worlddata, 
         		worldKey, 
         		worlddimension, 
-        		server.getServer().H.create(worlddata.o().c(GameRules.ab)), 
+        		server.getServer().H.create(worlddata.o().d(GameRules.ac)), 
         		worlddata.A(), 
         		seed, 
         		(creator.environment() == Environment.NORMAL ? list : ImmutableList.of()), 
         		true, 
-        		server.getServer().J().N(), 
+        		server.getServer().J().O(), 
         		creator.environment(), 
         		generator, 
         		biomeProvider);
-        // Only load if we attempt to join
-        if (!server.getWorlds().contains(internal.getWorld())) {
-        	try {
-				internal.close();
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-            return null;
-        }
+        initWorld(internal, worlddata, worlddata, worlddata.y());
         
-        Bukkit.getRegionScheduler().execute(PlayerHousing.getInstance(), internal.getWorld().getSpawnLocation(), () -> {
-		    server.getServer().initWorld(
-		    		internal, 
-		    		worlddata, 
-		    		worlddata, 
-		    		worlddata.y());
-		});
-        internal.a(true);
+        server.getServer().prepareLevels(internal.n().a.F, internal);
+        
         server.getServer().addLevel(internal);
-        server.getServer().prepareLevels(internal.m().a.E, internal);
-        Bukkit.getServer().getPluginManager().callEvent(new WorldLoadEvent(internal.getWorld()));
+        server.getServer().ag().a(internal);
+        if (worlddata.E() != null) {
+            server.getServer().aM().a(worlddata.E(), server.getServer().ba());
+         }
+        server.getPluginManager().callEvent(new WorldLoadEvent(internal.getWorld()));
         return internal.getWorld();
     }
-	
+
+	public void initWorld(WorldServer worldserver, IWorldDataServer iworlddataserver, SaveData saveData, WorldOptions worldoptions) {
+		  CraftServer server = DedicatedServer.getServer().server;
+	      boolean flag = saveData.A();
+	      if (worldserver.generator != null) {
+	         worldserver.getWorld().getPopulators().addAll(worldserver.generator.getDefaultPopulators(worldserver.getWorld()));
+	      }
+
+	      WorldBorder worldborder = worldserver.F_();
+	      worldborder.a(iworlddataserver.p());
+	      server.getPluginManager().callEvent(new WorldInitEvent(worldserver.getWorld()));
+	      if (!iworlddataserver.n()) {
+	         try {
+	            setInitialSpawn(worldserver, iworlddataserver, flag);
+	            iworlddataserver.c(true);
+	         } catch (Throwable var11) {
+	            CrashReport crashreport = CrashReport.a(var11, "Exception initializing level");
+
+	            try {
+	               worldserver.a(crashreport);
+	            } catch (Throwable var10) {}
+
+	            throw new ReportedException(crashreport);
+	         }
+
+	         iworlddataserver.c(true);
+	      }
+
+	   }
 	public void unloadWorld(PlayerWorld world) {
 	    org.bukkit.World bukkitWorld = world.getWorld();
 	    PlayerHousing.getAPI().removeWorld(world);
@@ -205,8 +227,8 @@ public class WorldUtils {
 		}
 		CraftWorld craftWorld = (CraftWorld) bukkitWorld;
 		WorldServer worldServer = craftWorld.getHandle();
-		worldServer.m().o();
 		Bukkit.getRegionScheduler().execute(PlayerHousing.getInstance(), bukkitWorld.getSpawnLocation(), () -> {
+			worldServer.n().d();
 			try {
 				worldServer.close();
 			} catch (IOException e) {
@@ -257,4 +279,17 @@ public class WorldUtils {
         Bukkit.getLogger().warning("No suitable random spawn found at (" + x + ", *, " + z + ")");
         return null;
     }
+    
+    private void setInitialSpawn(WorldServer worldserver, IWorldDataServer levelData, boolean debug) {
+    	Bukkit.getGlobalRegionScheduler().execute(PlayerHousing.getInstance(), () -> {
+    		Bukkit.getRegionScheduler().execute(PlayerHousing.getInstance(), worldserver.getWorld(), 0, 0, () -> {
+    		Location loc = getRandomSafeLocation(worldserver.getWorld(), 0, 64);
+           	   levelData.a(new BlockPosition(loc.getBlockX(), loc.getBlockY(), loc.blockZ()), 0.0F);
+              });
+         	Bukkit.getLogger().info("Set spawn for world.");
+            levelData.c(true);
+    	});
+
+     }
+
 }
