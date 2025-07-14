@@ -1,6 +1,7 @@
 package net.myteria.utils;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
@@ -178,6 +179,30 @@ public class WorldUtils {
         initWorld(internal, worlddata, worlddata, worlddata.y());
         
         server.getServer().prepareLevels(internal.n().a.F, internal);
+        
+        if (PlayerHousing.getInstance().isFolia())
+        	// Invokes the tick entity manager
+        	// fixes stuff like day/night cycle
+        	Bukkit.getGlobalRegionScheduler().runDelayed(PlayerHousing.getInstance(), (task) -> {
+        		try {
+                    // Get RegionizedServer.getInstance()
+                    Class<?> regionizedServerClass = Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
+                    Method getInstanceMethod = regionizedServerClass.getDeclaredMethod("getInstance");
+                    Object regionizedServer = getInstanceMethod.invoke(null); // static method
+
+                    // Get addWorld(ServerLevel) method
+                    Method addWorldMethod = regionizedServerClass.getDeclaredMethod("addWorld", WorldServer.class);
+                    addWorldMethod.setAccessible(true); // just in case it's not public
+
+                    // Invoke it
+                    addWorldMethod.invoke(regionizedServer, internal);
+
+                    Bukkit.getLogger().info("Registered world with RegionizedServer (Folia).");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Bukkit.getLogger().warning("Failed to register world with RegionizedServer.");
+                }
+        }, 2L);
         
         server.getServer().addLevel(internal);
         server.getServer().ag().a(internal);
