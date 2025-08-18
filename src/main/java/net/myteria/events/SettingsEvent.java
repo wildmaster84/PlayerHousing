@@ -13,6 +13,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.inventory.ItemStack;
 
 import net.myteria.HousingAPI;
@@ -155,6 +156,9 @@ public class SettingsEvent implements Listener{
             	HousingAPI api = PlayerHousing.getAPI();
                 String message = event.getMessage();
                 OfflinePlayer owner = api.getWorldOwner(player.getWorld());
+                if (player.getUniqueId() != owner.getUniqueId()) {
+                	player.sendMessage("§aYou can not set a motd for " + owner.getName() + "'s world!");
+                }
                 api.getWorldInstance(owner.getUniqueId()).setDescription(message);
                 player.sendMessage("§aYou have set the description to: §e" + message);
                 
@@ -162,4 +166,14 @@ public class SettingsEvent implements Listener{
             pendingInputs.remove(playerId);
         }
     }
-}
+	
+	@EventHandler
+	public void onWorldChangeEvent(PlayerChangedWorldEvent event) {
+		Player player = event.getPlayer();
+		HousingAPI api = PlayerHousing.getAPI();
+		OfflinePlayer owner = api.getWorldOwner(player.getWorld());
+		if (player.getUniqueId() != owner.getUniqueId()) {
+			if (pendingInputs.containsKey(player.getUniqueId())) pendingInputs.remove(player.getUniqueId());
+		}
+	}
+ }
